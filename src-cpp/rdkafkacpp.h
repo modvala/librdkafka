@@ -469,6 +469,7 @@ std::string  err2str(RdKafka::ErrorCode err);
 enum CertificateType {
   CERT_PUBLIC_KEY,   /**< Client's public key */
   CERT_PRIVATE_KEY,  /**< Client's private key */
+  CERT_CA,           /**< CA certificate */
   CERT__CNT
 };
 

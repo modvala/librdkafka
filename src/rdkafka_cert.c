@@ -75,7 +75,8 @@ static int rd_kafka_conf_ssl_passwd_cb (char *buf, int size, int rwflag,
 
 static const char *rd_kafka_cert_type_names[] = {
         "public-key",
-        "private-key"
+        "private-key",
+        "CA"
 };
 
 static const char *rd_kafka_cert_enc_names[] = {
@@ -97,6 +98,8 @@ static void rd_kafka_cert_destroy (rd_kafka_cert_t *cert) {
                 X509_free(cert->x509);
         if (cert->pkey)
                 EVP_PKEY_free(cert->pkey);
+        if (cert->chain)
+                sk_X509_pop_free(cert->chain, X509_free);
 #endif
         rd_free(cert);
 }
@@ -160,6 +163,11 @@ static rd_kafka_cert_t *rd_kafka_cert_new (const rd_kafka_conf_t *conf,
                         [RD_KAFKA_CERT_ENC_DER] = rd_true,
                         [RD_KAFKA_CERT_ENC_PEM] =  rd_true
                 },
+                [RD_KAFKA_CERT_CA] = {
+                        [RD_KAFKA_CERT_ENC_PKCS12] = rd_true,
+                        [RD_KAFKA_CERT_ENC_DER] = rd_true,
+                        [RD_KAFKA_CERT_ENC_PEM] = rd_true
+                },
         };
         const char *action = "";
         BIO *bio;
@@ -206,21 +214,116 @@ static rd_kafka_cert_t *rd_kafka_cert_new (const rd_kafka_conf_t *conf,
 
         switch (type)
         {
+        case RD_KAFKA_CERT_CA:
+                switch (encoding)
+                {
+                        case RD_KAFKA_CERT_ENC_PKCS12:
+                        {
+                                EVP_PKEY *ign_pkey;
+                                X509 *ign_cert;
+                                STACK_OF(X509) *cas = NULL;
+
+                                action = "parse PKCS#12";
+                                if (!PKCS12_parse(p12, conf->ssl.key_password,
+                                                  &ign_pkey, &ign_cert,
+                                                  &cas))
+                                        goto fail;
+
+                                EVP_PKEY_free(ign_pkey);
+                                X509_free(ign_cert);
+
+                                if (!cas || sk_X509_num(cas) < 1) {
+                                        action = "retrieve at least one CA "
+                                                "cert from PKCS#12";
+                                        if (cas)
+                                                sk_X509_pop_free(cas,
+                                                                 X509_free);
+                                        goto fail;
+                                }
+
+                                cert->chain = cas;
+                        }
+                        break;
+
+                        case RD_KAFKA_CERT_ENC_DER:
+                        {
+                                X509 *x509;
+
+                                action = "read DER / X.509 ASN.1";
+                                if (!(x509 = d2i_X509_bio(bio, NULL)))
+                                        goto fail;
+
+                                cert->chain = sk_X509_new_null();
+                        }
+                        break;
+
+                        case RD_KAFKA_CERT_ENC_PEM:
+                        {
+                                X509 *x509;
+
+                                action = "read PEM";
+
+                                cert->chain = sk_X509_new_null();
+
+                                /* This will read one certificate per call
+                                 * until an error occurs or the end of the
+                                 * buffer is reached (which is an error
+                                 * we'll need to clear). */
+                                while ((x509 =
+                                        PEM_read_bio_X509(
+                                                bio, NULL,
+                                                rd_kafka_conf_ssl_passwd_cb,
+                                                (void *)conf))) {
+                                        if (!sk_X509_push(cert->chain, x509)) {
+                                                X509_free(x509);
+                                                sk_X509_pop_free(
+                                                        cert->chain, X509_free);
+                                        }
+                                }
+
+                                if (!BIO_eof(bio)) {
+                                        /* Encountered parse error before
+                                         * reaching end, propagate error and
+                                         * fail. */
+                                        goto fail;
+                                }
+
+                                action = "retrieve at least one CA cert "
+                                        "from PEM";
+
+                                if (sk_X509_num(cert->chain) < 1)
+                                        goto fail;
+
+                                /* Reached end, which is raised as an error,
+                                 * so clear it since it is not. */
+                                ERR_clear_error();
+
+
+                        }
+                        break;
+
+                        default:
+                                RD_NOTREACHED();
+                                break;
+                }
+                break;
+
+
         case RD_KAFKA_CERT_PUBLIC_KEY:
                 switch (encoding)
                 {
                 case RD_KAFKA_CERT_ENC_PKCS12:
                 {
-                        EVP_PKEY *pkey;
+                        EVP_PKEY *ign_pkey;
 
                         action = "parse PKCS#12";
                         if (!PKCS12_parse(p12, conf->ssl.key_password,
-                                          &pkey, &cert->x509, NULL))
+                                          &ign_pkey, &cert->x509, NULL))
                                 goto fail;
 
-                        EVP_PKEY_free(pkey);
+                        EVP_PKEY_free(ign_pkey);
 
-                        action = "retrieve private key";
+                        action = "retrieve public key";
                         if (!cert->x509)
                                 goto fail;
                 }
@@ -340,7 +443,8 @@ rd_kafka_conf_set_ssl_cert (rd_kafka_conf_t *conf,
         rd_kafka_cert_t *cert;
         rd_kafka_cert_t **cert_map[RD_KAFKA_CERT__CNT] = {
                 [RD_KAFKA_CERT_PUBLIC_KEY]  = &conf->ssl.cert,
-                [RD_KAFKA_CERT_PRIVATE_KEY] = &conf->ssl.key
+                [RD_KAFKA_CERT_PRIVATE_KEY] = &conf->ssl.key,
+                [RD_KAFKA_CERT_CA]          = &conf->ssl.ca
         };
         rd_kafka_cert_t **certp;
 
@@ -395,6 +499,10 @@ void rd_kafka_conf_cert_dtor (int scope, void *pconf) {
                 rd_kafka_cert_destroy(conf->ssl.cert);
                 conf->ssl.cert = NULL;
         }
+        if (conf->ssl.ca) {
+                rd_kafka_cert_destroy(conf->ssl.ca);
+                conf->ssl.ca = NULL;
+        }
 #endif
 }
 
@@ -419,6 +527,9 @@ void rd_kafka_conf_cert_copy (int scope, void *pdst, const void *psrc,
 
         if (sconf->ssl.cert)
                 dconf->ssl.cert = rd_kafka_cert_dup(sconf->ssl.cert);
+
+        if (sconf->ssl.ca)
+                dconf->ssl.ca = rd_kafka_cert_dup(sconf->ssl.ca);
 #endif
 }
 

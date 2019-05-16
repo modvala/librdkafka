@@ -176,7 +176,7 @@ static void conf_location_to_setter (RdKafka::Conf *conf,
   if (conf->set_ssl_cert(cert_type, encoding, buffer.data(), size, errstr) !=
       RdKafka::Conf::CONF_OK)
     Test::Fail(tostr() << "Failed to set cert from " << loc <<
-               "as cert type " << cert_type << " with encoding " << encoding <<
+               " as cert type " << cert_type << " with encoding " << encoding <<
                ": " << errstr << "\n");
 }
 
@@ -191,14 +191,20 @@ static void do_test_verify (bool verify_ok,
                             cert_load_t load_key,
                             RdKafka::CertificateEncoding key_enc,
                             cert_load_t load_pub,
-                            RdKafka::CertificateEncoding pub_enc) {
+                            RdKafka::CertificateEncoding pub_enc,
+                            cert_load_t load_ca,
+                            RdKafka::CertificateEncoding ca_enc) {
   /*
    * Create any type of client
    */
 
-  Test::Say(tostr() << "SSL cert verify: verify_ok=" << verify_ok <<
-            ", load_key=" << (int)load_key << ", load_pub=" << load_pub <<
-            "\n");
+  std::string teststr = tostr() <<
+                        "SSL cert verify: verify_ok=" << verify_ok <<
+                        ", load_key=" << (int)load_key <<
+                        ", load_pub=" << load_pub <<
+                        ", load_ca=" << load_ca;
+
+  Test::Say(_C_BLU "[ " + teststr + " ]\n" _C_CLR);
 
   RdKafka::Conf *conf;
   Test::conf_init(&conf, NULL, 10);
@@ -225,6 +231,11 @@ static void do_test_verify (bool verify_ok,
   else if (load_pub == USE_SETTER)
     conf_location_to_setter(conf, "ssl.certificate.location",
                             RdKafka::CERT_PUBLIC_KEY, pub_enc);
+
+  if (load_ca == USE_SETTER)
+    conf_location_to_setter(conf, "ssl.ca.location",
+                            RdKafka::CERT_CA, ca_enc);
+
 
   std::string errstr;
   conf->set("debug", "security", errstr);
@@ -256,30 +267,39 @@ static void do_test_verify (bool verify_ok,
   mtx_unlock(&verifyCb.lock);
 
   delete p;
+
+    Test::Say(_C_GRN "[ PASSED: " + teststr + " ]\n" _C_CLR);
 }
 
 extern "C" {
   int main_0097_ssl_verify (int argc, char **argv) {
     do_test_verify(true,
                    USE_LOCATION, RdKafka::CERT_ENC_PEM,
+                   USE_LOCATION, RdKafka::CERT_ENC_PEM,
                    USE_LOCATION, RdKafka::CERT_ENC_PEM);
     do_test_verify(false,
                    USE_LOCATION, RdKafka::CERT_ENC_PEM,
+                   USE_LOCATION, RdKafka::CERT_ENC_PEM,
                    USE_LOCATION, RdKafka::CERT_ENC_PEM);
 
-    /* Verify various priv and pub key input formats */
+    /* Verify various priv and pub key and CA input formats */
     do_test_verify(true,
                    USE_CONF, RdKafka::CERT_ENC_PEM,
-                   USE_CONF, RdKafka::CERT_ENC_PEM);
+                   USE_CONF, RdKafka::CERT_ENC_PEM,
+                   USE_LOCATION, RdKafka::CERT_ENC_PEM);
     do_test_verify(true,
+                   USE_SETTER, RdKafka::CERT_ENC_PEM,
                    USE_SETTER, RdKafka::CERT_ENC_PEM,
                    USE_SETTER, RdKafka::CERT_ENC_PEM);
     do_test_verify(true,
                    USE_LOCATION, RdKafka::CERT_ENC_PEM,
+                   USE_SETTER, RdKafka::CERT_ENC_DER,
                    USE_SETTER, RdKafka::CERT_ENC_DER);
     do_test_verify(true,
                    USE_SETTER, RdKafka::CERT_ENC_PKCS12,
+                   USE_SETTER, RdKafka::CERT_ENC_PKCS12,
                    USE_SETTER, RdKafka::CERT_ENC_PKCS12);
+
     return 0;
   }
 }

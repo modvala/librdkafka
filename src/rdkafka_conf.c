@@ -657,6 +657,12 @@ static const struct rd_kafka_property rd_kafka_properties[] = {
           "File or directory path to CA certificate(s) for verifying "
           "the broker's key."
         },
+        { _RK_GLOBAL, "ssl_ca", _RK_C_INTERNAL,
+          _RK(ssl.ca),
+          "CA certificate as set by rd_kafka_conf_set_ssl_cert()",
+          .dtor = rd_kafka_conf_cert_dtor,
+          .copy = rd_kafka_conf_cert_copy
+        },
         { _RK_GLOBAL, "ssl.crl.location", _RK_C_STR,
           _RK(ssl.crl_location),
           "Path to CRL for verifying broker's certificate validity."
@@ -3084,6 +3090,9 @@ const char *rd_kafka_conf_finalize (rd_kafka_type_t cltype,
         if (conf->ssl.keystore_location && !conf->ssl.keystore_password)
                 return "`ssl.keystore.password` is mandatory when "
                         "`ssl.keystore.location` is set";
+        if (conf->ssl.ca && conf->ssl.ca_location)
+                return "`ssl.ca.location`, and memory-based "
+                       "set_ssl_cert(CERT_CA) are mutually exclusive.";
 #endif
 
         if (cltype == RD_KAFKA_CONSUMER) {

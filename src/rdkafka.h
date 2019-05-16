@@ -2023,6 +2023,7 @@ rd_kafka_conf_res_t rd_kafka_conf_set_ssl_cert_verify_cb (
 typedef enum rd_kafka_cert_type_t {
         RD_KAFKA_CERT_PUBLIC_KEY,  /**< Client's public key */
         RD_KAFKA_CERT_PRIVATE_KEY, /**< Client's private key */
+        RD_KAFKA_CERT_CA,          /**< CA certificate */
         RD_KAFKA_CERT__CNT,
 } rd_kafka_cert_type_t;
 
@@ -2056,9 +2057,14 @@ typedef enum rd_kafka_cert_enc_t {
  * @param errstr_size Size of \p errstr, including space for nul-terminator.
  *
  * Valid combinations:
- *  RD_KAFKA_CERT_PUBLIC_KEY:  RD_KAFKA_CERT_ENC_PKCS12, RD_KAFKA_CERT_ENC_DER,
- *                             RD_KAFKA_CERT_ENC_PEM
- *  RD_KAFKA_CERT_PRIVATE_KEY: RD_KAFKA_CERT_ENC_PKCS12, RD_KAFKA_CERT_ENC_PEM
+ *  RD_KAFKA_CERT_PUBLIC_KEY, RD_KAFKA_CERT_CA:
+ *    - RD_KAFKA_CERT_ENC_PKCS12
+ *    - RD_KAFKA_CERT_ENC_DER
+ *    - RD_KAFKA_CERT_ENC_PEM
+ *
+ *  RD_KAFKA_CERT_PRIVATE_KEY:
+ *    - RD_KAFKA_CERT_ENC_PKCS12
+ *    - RD_KAFKA_CERT_ENC_PEM
  *
  * @returns RD_KAFKA_CONF_OK on success or RD_KAFKA_CONF_INVALID if the
  *          \p cert_type / \p cert_enc combination is invalid, or if the
